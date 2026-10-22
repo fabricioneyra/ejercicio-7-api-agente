@@ -1,0 +1,49 @@
+# Servicios:
+#   redis   -> Redis Stack (incluye RedisJSON + RediSearch, que necesita el checkpointer de LangGraph)
+#   phoenix -> dashboard de observabilidad (UI en http://localhost:6006)
+#   api     -> la API FastAPI (con su worker adentro)
+#
+# Solo la infraestructura (API corriendo en tu máquina):  docker compose up -d redis phoenix
+# Todo junto (API en Docker):                             docker compose up -d --build
+services:
+  redis:
+    image: redis/redis-stack-server:latest
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - redis-data:/data
+
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    ports:
+      - "6006:6006"   # UI + colector HTTP (OTLP)
+      - "4317:4317"   # colector gRPC (OTLP)
+    volumes:
+      - phoenix-data:/mnt/data
+    environment:
+      - PHOENIX_WORKING_DIR=/mnt/data
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      # Dentro de Docker los servicios se ven por su nombre, no por localhost.
+      - REDIS_URL=redis://redis:6379/0
+      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006
+      - OBSERVABILITY=phoenix
+    depends_on:
+      redis:
+        condition: service_healthy
+      phoenix:
+        condition: service_started
+
+volumes:
+  redis-data:
+  phoenix-data:
